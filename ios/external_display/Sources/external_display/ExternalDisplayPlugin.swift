@@ -474,10 +474,24 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
     static func handleDeclaredSceneDidDisconnect(sceneWindow: UIWindow?) {
         // Only the session shown on this scene ends here. When the UIScreen disconnect
         // observer ran first it has already done so, and a late disconnect of an older scene
-        // must not mark a live session unplugged: report nothing then.
-        guard let sceneWindow, sceneWindow === externalWindow else { return }
+        // must not mark a live session unplugged: then only report the settled unplug state.
+        guard let sceneWindow, sceneWindow === externalWindow else {
+            scheduleSettledUnplugReport()
+            return
+        }
         tearDownExternalSession(notifyUnplug: false)
         reportSessionEnded()
+    }
+
+    /// A declared scene ended with no session on it. A settle time later, report `false` if
+    /// no external display is attached any more, so the unplug report does not rest on the
+    /// deprecated UIScreen notification alone; report nothing while one still is.
+    static func scheduleSettledUnplugReport() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if !isExternalDisplayConnected() {
+                mainViewEvents?(false)
+            }
+        }
     }
 
     /// The host's UIApplicationSceneManifest; nil when it does not use the UIScene life cycle.
