@@ -11,7 +11,7 @@ Fork build (`mjafartp/external_display`, branch `integration`), not an upstream 
 - **Android**: the external window can no longer be closed with the Back key. When Android or the host Activity closes it, or its display is removed, the session is released and the app receives "unplugged" followed by the current plug state.
 - **Android**: the display listener is registered once per engine and removed with it. A `connect` that fails releases everything it created and returns `false`.
 - **Android**: the external display is picked from the presentation displays first (with the previous behaviour as fallback), and the external view is built with that display's own context, so it uses the right density.
-- **Android**: platform views on the external display work again on Flutter 3.38 and newer.
+- **Android**: platform views on the external display should work again on Flutter 3.38 and newer: only the engine's platform-views delegator installs their channel handler, and the plugin now attaches it (from reading the engine source; not yet run with a platform view).
 - **Android**: every `waitingTransferParametersReady` call is answered exactly once, each route keeps its own parameter stream, and `disconnect` returns `true` only when a session was closed.
 - **Dart**: several `ExternalDisplay` or `TransferParameters` instances now share one native subscription; creating or disposing one no longer cuts the others off.
 - **Dart**: a listener that throws or removes itself no longer stops the remaining listeners; an unplug clears `resolution`.
@@ -24,6 +24,8 @@ Fork build (`mjafartp/external_display`, branch `integration`), not an upstream 
 
 ### Changed
 - **Android**: the manifest `package` attribute (ignored by current Android Gradle Plugin versions) and the unused `mockito-core` test dependency are removed.
+- **Android**: `getScreen` prints each display's size as the physical size of its current mode, the size `connect` reports; it printed `display.width` / `display.height` before, which follow rotation.
+- **Android** (Kotlin only, not visible from Dart): `ExternalDisplayPlugin.connectReturn` is removed, `externalViewEvents` is no longer public, and the `ExternalViewHandler` constructor also takes the route name and the engine.
 
 ## 0.5.3
 
