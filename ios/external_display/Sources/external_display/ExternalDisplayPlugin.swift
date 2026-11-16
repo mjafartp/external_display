@@ -323,6 +323,15 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         window.isHidden = false
         externalWindow = window
 
+        // Under the UIScene life cycle a window without a window scene appears on no screen
+        // (UIWindow.windowScene), and Flutter takes its screen and scale from that scene, so
+        // report a size only when the window really landed on the external screen.
+        if sceneManifest != nil, window.windowScene?.screen !== externalScreen {
+            tearDownExternalSession(notifyUnplug: false)
+            result(false)
+            return
+        }
+
         result(["height": mode.size.height, "width": mode.size.width])
     }
 
