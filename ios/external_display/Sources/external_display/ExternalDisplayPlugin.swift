@@ -312,7 +312,16 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
 
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = flutterViewController
-        window.makeKeyAndVisible()
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *) {
+            window.makeKeyAndVisible()
+        } else {
+            // Below iOS 27, as the UIScreen path does: shown, never the key window.
+            window.isHidden = false
+        }
+        #else
+        window.isHidden = false
+        #endif
         externalWindow = window
 
         // 讓 scene delegate 持有 window，避免被釋放
