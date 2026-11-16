@@ -224,9 +224,10 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             registration.isEnabled = false
         }
     }
+    #endif
 
     /// 將外接 Flutter 內容掛到指定的 UIWindowScene
-    @available(iOS 27.0, *)
+    /// Shared by the iOS 27 scene accessory and the window scene path below iOS 27.
     static func attachExternalContent(to windowScene: UIWindowScene) {
         // 已有外接 window：只完成 pending connect（回傳尺寸）
         if externalWindow != nil {
@@ -264,6 +265,7 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         completePendingConnect(["height": size.height, "width": size.width])
     }
 
+    #if compiler(>=6.4)
     /// 在已連線 scenes 中尋找外接非互動 WindowScene
     @available(iOS 27.0, *)
     static func findExternalWindowScene() -> UIWindowScene? {
@@ -281,6 +283,13 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
 
     /// iOS 27 以前：直接用 UIScreen.screens[1] 建立外接 UIWindow
     static func connectWithLegacyScreen(routeName: String, result: @escaping FlutterResult) {
+        // Under the UIScene life cycle a window is shown only through a window scene: use
+        // the external display's scene when the system has connected one.
+        if let windowScene = findExternalDisplayScene() {
+            connectWithWindowScene(windowScene, routeName: routeName, result: result)
+            return
+        }
+
         guard UIScreen.screens.count > 1 else {
             result(false)
             return
@@ -315,6 +324,54 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         externalWindow = window
 
         result(["height": mode.size.height, "width": mode.size.width])
+    }
+
+    // MARK: - Window scene path below iOS 27
+
+    /// Starts the external content and attaches it to `windowScene`.
+    static func connectWithWindowScene(
+        _ windowScene: UIWindowScene,
+        routeName: String,
+        result: @escaping FlutterResult
+    ) {
+        tearDownExternalSession(notifyUnplug: false)
+
+        // A previous connect may still be waiting: answer it before replacing it.
+        completePendingConnect(false)
+        pendingConnectResult = result
+        prepareExternalFlutterContent(routeName: routeName)
+        attachExternalContent(to: windowScene)
+    }
+
+    /// The host's UIApplicationSceneManifest; nil when it does not use the UIScene life cycle.
+    static var sceneManifest: [String: Any]? {
+        Bundle.main.object(forInfoDictionaryKey: "UIApplicationSceneManifest") as? [String: Any]
+    }
+
+    /// The session role of a non-interactive external display on this iOS version.
+    static var externalDisplayRole: UISceneSession.Role {
+        if #available(iOS 16.0, *) {
+            return .windowExternalDisplayNonInteractive
+        }
+        return .windowExternalDisplay
+    }
+
+    /// A connected window scene of the external display, under the UIScene life cycle only.
+    /// Never the app's own scene, which Stage Manager can also place on the external screen.
+    static func findExternalDisplayScene() -> UIWindowScene? {
+        // Without the UIScene life cycle the UIScreen path stays exactly as it was.
+        guard sceneManifest != nil else { return nil }
+
+        let externalScreens = UIScreen.screens.dropFirst()
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene,
+                  windowScene.session.role != .windowApplication else { continue }
+            if windowScene.session.role == externalDisplayRole
+                || externalScreens.contains(where: { $0 === windowScene.screen }) {
+                return windowScene
+            }
+        }
+        return nil
     }
 
     // MARK: - Shared helpers
