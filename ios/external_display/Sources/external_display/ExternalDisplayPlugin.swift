@@ -116,6 +116,13 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
 
     /// 斷開外接畫面並清理資源
     static func disconnect() -> Bool {
+        // A pending "still attached" report is about a session that had already ended: keep
+        // it. A live session ended here is never reported (its scene finds no session).
+        tearDownExternalSession(notifyUnplug: false)
+        // Answer a connect still waiting for its scene instead of dropping it.
+        completePendingConnect(false)
+        // Disable only now: a scene disconnect delivered from the setter must find the
+        // session gone already, or it would count as one the app did not end.
         #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             // 停用 scene accessory，讓系統收回外接 scene
@@ -124,11 +131,6 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             }
         }
         #endif
-        // A pending "still attached" report is about a session that had already ended: keep
-        // it. A live session ended here is never reported (its scene finds no session).
-        tearDownExternalSession(notifyUnplug: false)
-        // Answer a connect still waiting for its scene instead of dropping it.
-        completePendingConnect(false)
         return true
     }
 
