@@ -1,3 +1,13 @@
+## 0.6.0-lithos.2
+
+Fork build (`mjafartp/external_display`, branch `integration`), not an upstream release.
+
+### Fixed
+- **iOS**: the host's `registerGeneratedPlugin` hook now runs before the external engine's Dart code can make its first plugin call. On the iOS 27 scene path the hook ran only when the external scene attached, so the external view's first plugin call could fail with `MissingPluginException` (reproduced and fixed on the iOS 27 iPad simulator).
+- **iOS 16–26**: `connect` attaches the external view through the external display's window scene when the host declares the `UIWindowSceneSessionRoleExternalDisplayNonInteractive` role with `ExternalDisplaySceneDelegate` in its `Info.plist`; hosts without the UIScene life cycle keep the previous path. Not yet run on a device or simulator below iOS 27.
+- **iOS**: when a session ends without the app asking for it while an external display is still attached, the status listener receives `false` and, about a second later, `true`, so the app can connect again (it used to stay "unplugged" until the cable was re-inserted). `connect` answers `false` instead of a size when no window could be attached, and a `connect` waiting for its scene is answered at once when the screen disconnects.
+- **Dart**: an unplug that reaches an instance while its `connect()` is still running makes that call return `false` and leaves `resolution` cleared. On iOS the status event of a session that ends right after connecting can reach Dart before the connect result.
+
 ## 0.6.0-lithos.1
 
 Fork build (`mjafartp/external_display`, branch `integration`), not an upstream release. It combines the changes proposed upstream as separate pull requests.
