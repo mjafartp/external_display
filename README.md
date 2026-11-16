@@ -184,7 +184,7 @@ void onDisplayChange(bool connecting) { /* ... */ }
 externalDisplay.addStatusListener(onDisplayChange);
 ```
 
-On iOS, when a running session ends without `disconnect()` or `connect()` asking for it (the system disconnects the external display's scene, or a screen disconnect tears the session down), the listener receives `false` and, about a second later, `true` if an external display is still attached. The external view is gone by then: call `connect` again to show it. The plugin never reconnects by itself, and a session ended by `disconnect()` or replaced by `connect()` is not reported.
+On iOS, when a running session ends without `disconnect()` or `connect()` asking for it (the system disconnects the external display's scene, or a screen disconnect tears the session down), the listener receives `false` and, about a second later, `true` if an external display is still attached (below iOS 27 with the declared external display role: if its scene is connected again; otherwise the `true` follows when the scene returns). The external view is gone by then: call `connect` again to show it. The plugin never reconnects by itself, and a session ended by `disconnect()` or replaced by `connect()` is not reported; calling `disconnect()` after that `false` does not cancel the `true`.
 
 ### Cancel External Display Monitoring
 
