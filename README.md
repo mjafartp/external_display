@@ -151,8 +151,8 @@ This plugin handles that for you:
 
 * When built with Xcode 27 or newer, on iOS 27+ `connect()` registers `UISceneAccessory.externalNonInteractive` on the main `FlutterViewController`, enables it, and attaches a `UIWindow` in `ExternalDisplaySceneDelegate` when the system connects the external scene. The reported size is in points.
 * On iOS 15–26 (and on every iOS version when built with an older Xcode), `connect()`:
-  * with the UIScene lifecycle, attaches a `UIWindow(windowScene:)` to the external display's window scene when the system has connected one, and reports its size in points;
-  * if the host declared the external display role (step 1) and that scene has not connected yet, waits up to 10 seconds for it, then answers `false`;
+  * with the UIScene lifecycle, attaches a `UIWindow(windowScene:)` to the external display's window scene when the system has connected one, and reports its size in points. Unlike the legacy path, this path does not force the display mode, so a host that got one size from the legacy path may now get another, in points;
+  * if the host declared the external display role in its Info.plist (step 1), a second `UIScreen` is present and that scene has not connected yet, waits up to 10 seconds for it, then answers `false`. Only the Info.plist entry is detected, not a configuration returned from `application(_:configurationForConnecting:options:)`. The plugin looks the entry up under the role name of the running iOS version; on iOS 15 that is the older `UIWindowSceneSessionRoleExternalDisplay`, so the step 1 entry does not count there and iOS 15 behaves as if the role were not declared;
   * otherwise keeps the legacy `UIScreen` + `UIWindow.screen` path (size in pixels). Under the UIScene lifecycle it answers `false` instead of a size when that window did not end up on the external screen.
 * Apps without the UIScene lifecycle keep the legacy path unchanged.
 * Host apps do **not** need to register `UISceneAccessory` manually.
@@ -183,6 +183,8 @@ void onDisplayChange(bool connecting) { /* ... */ }
 
 externalDisplay.addStatusListener(onDisplayChange);
 ```
+
+On iOS, when a running session ends without `disconnect()` or `connect()` asking for it (the system disconnects the external display's scene, or a screen disconnect tears the session down), the listener receives `false` and, about a second later, `true` if an external display is still attached. The external view is gone by then: call `connect` again to show it. The plugin never reconnects by itself, and a session ended by `disconnect()` or replaced by `connect()` is not reported.
 
 ### Cancel External Display Monitoring
 
