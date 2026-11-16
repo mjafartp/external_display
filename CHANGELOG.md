@@ -1,3 +1,30 @@
+## 0.6.0-lithos.1
+
+Fork build (`mjafartp/external_display`, branch `integration`), not an upstream release. It combines the changes proposed upstream as separate pull requests.
+
+### Added
+- `getDisplays()` returns an `ExternalDisplayInfo` for every display: `id`, `name`, `width`, `height`, `isPrimary` and `hasTouch` (`true`, `false`, or `null` when the platform cannot tell). On Android the touch answer is per display from Android 12L (API 32); iOS reports `false` for external screens; macOS reports `null`.
+- `ExternalDisplay.isConnected`: `true` while the instance that called `connect()` has a resolution.
+
+### Fixed
+- **Android**: `connect` no longer destroys and restarts the external view when it is already showing on the same display.
+- **Android**: the external window can no longer be closed with the Back key. When Android or the host Activity closes it, or its display is removed, the session is released and the app receives "unplugged" followed by the current plug state.
+- **Android**: the display listener is registered once per engine and removed with it. A `connect` that fails releases everything it created and returns `false`.
+- **Android**: the external display is picked from the presentation displays first (with the previous behaviour as fallback), and the external view is built with that display's own context, so it uses the right density.
+- **Android**: platform views on the external display work again on Flutter 3.38 and newer.
+- **Android**: every `waitingTransferParametersReady` call is answered exactly once, each route keeps its own parameter stream, and `disconnect` returns `true` only when a session was closed.
+- **Dart**: several `ExternalDisplay` or `TransferParameters` instances now share one native subscription; creating or disposing one no longer cuts the others off.
+- **Dart**: a listener that throws or removes itself no longer stops the remaining listeners; an unplug clears `resolution`.
+- **Dart**: on platforms without a native implementation (Windows, Linux, web) the classes no longer report an error at construction; methods return `false` or an empty list.
+- **iOS / macOS**: the parameter stream of the external view keeps working after an instance is disposed (the `MissingPluginException … receiveParametersListener` error).
+- **iOS**: a `connect()` that is still waiting is answered with `false` when `disconnect()` or another `connect()` arrives, instead of never completing; the main view controller lookup can no longer pick the external one.
+- **iOS**: the plugin compiles with Xcode versions older than 27 (the iOS 27 scene code is behind a compiler check; not yet built on such an Xcode).
+- **macOS**: `createWindow(fullscreen: true)` on a window that is already fullscreen no longer toggles it out of fullscreen.
+- `TransferParameters.sendParameters` returns `false` when the main view is not listening (all platforms).
+
+### Changed
+- **Android**: the manifest `package` attribute (ignored by current Android Gradle Plugin versions) and the unused `mockito-core` test dependency are removed.
+
 ## 0.5.3
 
 ### Fixed
