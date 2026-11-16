@@ -476,6 +476,12 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
     /// 拆除外接 session（window、通道、引擎）
     /// - Parameter notifyUnplug: 是否通知主畫面「已拔除」
     static func tearDownExternalSession(notifyUnplug: Bool) {
+        // The scene delegate holds the window too: let it go with the session.
+        if let window = externalWindow,
+           let sceneDelegate = window.windowScene?.delegate as? ExternalDisplaySceneDelegate,
+           sceneDelegate.window === window {
+            sceneDelegate.window = nil
+        }
         externalWindow?.isHidden = true
         externalWindow?.rootViewController = nil
         externalWindow = nil
