@@ -160,6 +160,20 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         stillAttachedReport = nil
     }
 
+    /// A UIScreen disconnect destroyed the engine of a connect still waiting for its scene:
+    /// answer that connect now instead of at its 10 second timeout.
+    static func failPendingConnectAfterScreenLoss() {
+        guard pendingConnectResult != nil else { return }
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *),
+           let registration = sceneAccessoryRegistration as? UISceneAccessoryRegistration {
+            // As the connect timeout does.
+            registration.isEnabled = false
+        }
+        #endif
+        completePendingConnect(false)
+    }
+
     // MARK: - iOS 27+ UISceneAccessory
 
     // UISceneAccessory ships with the iOS 27 SDK (Xcode 27, Swift 6.4). @available is
@@ -768,6 +782,7 @@ public class MainViewHandler: NSObject, FlutterStreamHandler {
             queue: .main
         ) { _ in
             let sessionEnded = ExternalDisplayPlugin.tearDownExternalSession(notifyUnplug: false)
+            ExternalDisplayPlugin.failPendingConnectAfterScreenLoss()
             events(false)
             // Another external display may still be attached: report it as for a scene.
             if sessionEnded {
