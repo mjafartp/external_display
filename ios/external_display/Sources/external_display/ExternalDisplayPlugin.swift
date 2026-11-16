@@ -295,6 +295,13 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // The host assigned ExternalDisplaySceneDelegate to the external display role, so the
+        // system connects a scene for this screen, possibly after the plug event: wait for it.
+        if hostDeclaresExternalDisplayScene() {
+            connectWithWindowScene(nil, routeName: routeName, result: result)
+            return
+        }
+
         tearDownExternalSession(notifyUnplug: false)
 
         let externalScreen = UIScreen.screens[1]
@@ -337,9 +344,10 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
 
     // MARK: - Window scene path below iOS 27
 
-    /// Starts the external content and attaches it to `windowScene`.
+    /// Starts the external content and attaches it to `windowScene`, or, when it is nil,
+    /// waits up to 10 seconds for ExternalDisplaySceneDelegate to deliver the scene.
     static func connectWithWindowScene(
-        _ windowScene: UIWindowScene,
+        _ windowScene: UIWindowScene?,
         routeName: String,
         result: @escaping FlutterResult
     ) {
@@ -349,7 +357,41 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         completePendingConnect(false)
         pendingConnectResult = result
         prepareExternalFlutterContent(routeName: routeName)
-        attachExternalContent(to: windowScene)
+
+        if let windowScene {
+            attachExternalContent(to: windowScene)
+            return
+        }
+
+        let timeout = DispatchWorkItem {
+            guard let pending = pendingConnectResult else { return }
+            pendingConnectResult = nil
+            tearDownExternalSession(notifyUnplug: false)
+            pending(false)
+        }
+        pendingConnectTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: timeout)
+    }
+
+    /// Called by ExternalDisplaySceneDelegate below iOS 27: the system connected the scene the
+    /// host declared for the external display.
+    static func handleDeclaredSceneWillConnect(_ scene: UIWindowScene) {
+        // Attach at once when a connect is waiting for this scene.
+        if pendingConnectResult != nil {
+            attachExternalContent(to: scene)
+        }
+        mainViewEvents?(true)
+    }
+
+    /// Called by ExternalDisplaySceneDelegate below iOS 27 with the window it holds.
+    static func handleDeclaredSceneDidDisconnect(sceneWindow: UIWindow?) {
+        // Tear down only the session shown on this scene. When the UIScreen disconnect
+        // observer ran first it has already done so, and nothing is torn down twice.
+        if let sceneWindow, sceneWindow === externalWindow {
+            tearDownExternalSession(notifyUnplug: false)
+        }
+        // Dart drops a repeated `false`, so the UIScreen observer may send it too.
+        mainViewEvents?(false)
     }
 
     /// The host's UIApplicationSceneManifest; nil when it does not use the UIScene life cycle.
@@ -363,6 +405,17 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             return .windowExternalDisplayNonInteractive
         }
         return .windowExternalDisplay
+    }
+
+    /// Whether the host's Info.plist assigns ExternalDisplaySceneDelegate to the external
+    /// display role.
+    static func hostDeclaresExternalDisplayScene() -> Bool {
+        guard let configurations = sceneManifest?["UISceneConfigurations"] as? [String: Any],
+              let entries = configurations[externalDisplayRole.rawValue] as? [[String: Any]] else {
+            return false
+        }
+        let delegateName = NSStringFromClass(ExternalDisplaySceneDelegate.self)
+        return entries.contains { ($0["UISceneDelegateClassName"] as? String) == delegateName }
     }
 
     /// A connected window scene of the external display, under the UIScene life cycle only.
@@ -553,9 +606,10 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
     }
 }
 
-// MARK: - External scene delegate (iOS 27+)
+// MARK: - External scene delegate
 
 /// 供 [UISceneAccessory.externalNonInteractive] 使用的 Scene Delegate
+/// Below iOS 27 a host can assign it to the external display role in its Info.plist.
 @objc(ExternalDisplaySceneDelegate)
 public class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
     public var window: UIWindow?
@@ -565,13 +619,19 @@ public class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
         willConnectTo session: UISceneSession,
         options connectionOptions: UIScene.ConnectionOptions
     ) {
-        #if compiler(>=6.4)
-        guard #available(iOS 27.0, *),
-              let windowScene = scene as? UIWindowScene else {
+        guard let windowScene = scene as? UIWindowScene else {
             return
         }
-        // 外接 scene 連上：掛載 Flutter 內容
-        ExternalDisplayPlugin.handleExternalSceneWillConnect(windowScene)
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *) {
+            // 外接 scene 連上：掛載 Flutter 內容
+            ExternalDisplayPlugin.handleExternalSceneWillConnect(windowScene)
+        } else {
+            // Below iOS 27 this scene comes from the host's Info.plist scene configuration.
+            ExternalDisplayPlugin.handleDeclaredSceneWillConnect(windowScene)
+        }
+        #else
+        ExternalDisplayPlugin.handleDeclaredSceneWillConnect(windowScene)
         #endif
     }
 
@@ -580,7 +640,11 @@ public class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
         if #available(iOS 27.0, *) {
             // 外接 scene 斷開：清理 session
             ExternalDisplayPlugin.handleExternalSceneDidDisconnect()
+        } else {
+            ExternalDisplayPlugin.handleDeclaredSceneDidDisconnect(sceneWindow: window)
         }
+        #else
+        ExternalDisplayPlugin.handleDeclaredSceneDidDisconnect(sceneWindow: window)
         #endif
         window = nil
     }
