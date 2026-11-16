@@ -70,7 +70,7 @@ final destroyed = await externalDisplay.destroyWindow(); // Future<bool>
 
 #### 1. Adopt the UIScene lifecycle (required for iOS 27)
 
-iOS 27 / Xcode 27 requires the `UIScene` lifecycle. Add an Application Scene Manifest to your `Info.plist` (see the [Flutter UIScene migration guide](https://docs.flutter.dev/release/breaking-changes/uiscenedelegate)):
+iOS 27 / Xcode 27 requires the `UIScene` lifecycle. Add an Application Scene Manifest to your `Info.plist` (see the [Flutter UIScene migration guide](https://docs.flutter.dev/release/breaking-changes/uiscenedelegate)), and assign the plugin's `ExternalDisplaySceneDelegate` to the external display role:
 
 ```xml
 <key>UIApplicationSceneManifest</key>
@@ -92,9 +92,22 @@ iOS 27 / Xcode 27 requires the `UIScene` lifecycle. Add an Application Scene Man
         <string>Main</string>
       </dict>
     </array>
+    <key>UIWindowSceneSessionRoleExternalDisplayNonInteractive</key>
+    <array>
+      <dict>
+        <key>UISceneClassName</key>
+        <string>UIWindowScene</string>
+        <key>UISceneDelegateClassName</key>
+        <string>ExternalDisplaySceneDelegate</string>
+        <key>UISceneConfigurationName</key>
+        <string>external_display</string>
+      </dict>
+    </array>
   </dict>
 </dict>
 ```
+
+The external display entry is for iOS 16–26: under the UIScene lifecycle a window is shown only through a window scene, and this entry asks the system to hand the plugin a scene for the external screen. iOS 27 does not use it (the plugin presents through `UISceneAccessory` there, see step 3); on the iOS 27 iPad simulator, `connect`, drawing and plug events behaved the same with and without it.
 
 #### 2. Register plugins for UIScene (required)
 
@@ -128,15 +141,23 @@ import external_display
 
 Example: <https://github.com/GavinFu7/external_display/blob/main/example/ios/Runner/AppDelegate.swift>
 
+`registerGeneratedPlugin` is called with the external engine's `FlutterViewController` right after `connect()` starts that engine, in the same main-thread turn and before its Dart entrypoint runs, so plugins used at the top of `externalDisplayMain` are already registered even when the window is attached later.
+
 #### 3. UISceneAccessory for external displays (iOS 27+)
 
 Starting with **iOS 27**, custom content on a non-interactive external display is only delivered after the app registers a [`UISceneAccessory`](https://developer.apple.com/documentation/uikit/uisceneaccessory).
 
 This plugin handles that for you:
 
-* When built with Xcode 27 or newer, on iOS 27+ `connect()` registers `UISceneAccessory.externalNonInteractive` on the main `FlutterViewController`, enables it, and attaches a `UIWindow` in `ExternalDisplaySceneDelegate` when the system connects the external scene.
-* On iOS 15–26, and on every iOS version when built with an older Xcode, the plugin keeps the legacy `UIScreen` + `UIWindow.screen` path.
+* When built with Xcode 27 or newer, on iOS 27+ `connect()` registers `UISceneAccessory.externalNonInteractive` on the main `FlutterViewController`, enables it, and attaches a `UIWindow` in `ExternalDisplaySceneDelegate` when the system connects the external scene. The reported size is in points.
+* On iOS 15–26 (and on every iOS version when built with an older Xcode), `connect()`:
+  * with the UIScene lifecycle, attaches a `UIWindow(windowScene:)` to the external display's window scene when the system has connected one, and reports its size in points. Unlike the legacy path, this path does not force the display mode, so a host that got one size from the legacy path may now get another, in points;
+  * if the host declared the external display role in its Info.plist (step 1), a second `UIScreen` is present and that scene has not connected yet, waits up to 10 seconds for it, then answers `false`. Only the Info.plist entry is detected, not a configuration returned from `application(_:configurationForConnecting:options:)`. The plugin looks the entry up under the role name of the running iOS version; on iOS 15 that is the older `UIWindowSceneSessionRoleExternalDisplay`, so the step 1 entry does not count there and iOS 15 behaves as if the role were not declared;
+  * otherwise keeps the legacy `UIScreen` + `UIWindow.screen` path (size in pixels). Under the UIScene lifecycle it answers `false` instead of a size when that window did not end up on the external screen.
+* Apps without the UIScene lifecycle keep the legacy path unchanged.
 * Host apps do **not** need to register `UISceneAccessory` manually.
+
+> **Testing status:** the iOS 27 path was run on the iOS 27 iPad simulator with a simulated external display. The iOS 15–26 paths above (window scene, declared scene delegate, legacy fallback) have **not** been run on a device or simulator yet.
 
 Dart usage is unchanged:
 
@@ -164,6 +185,8 @@ externalDisplay.addStatusListener(onDisplayChange);
 ```
 
 On Android, the listener receives `false` and then `true` when Android or the host Activity ends a running session while the display stays attached (for example Android dismisses the external window, or the Activity is destroyed or recreated). The external view is gone by then: call `connect` again to show it.
+
+On iOS, when a running session ends without `disconnect()` or `connect()` asking for it (the system disconnects the external display's scene, or a screen disconnect tears the session down), the listener receives `false` and, about a second later, `true` if an external display is still attached (below iOS 27 with the declared external display role: if its scene is connected again; otherwise the `true` follows when the scene returns). The external view is gone by then: call `connect` again to show it. The plugin never reconnects by itself, and a session ended by `disconnect()` or replaced by `connect()` is not reported; calling `disconnect()` after that `false` does not cancel the `true`.
 
 ### Cancel External Display Monitoring
 
