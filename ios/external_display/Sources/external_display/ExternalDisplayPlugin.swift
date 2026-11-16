@@ -809,8 +809,9 @@ public class MainViewHandler: NSObject, FlutterStreamHandler {
             let sessionEnded = ExternalDisplayPlugin.tearDownExternalSession(notifyUnplug: false)
             ExternalDisplayPlugin.failPendingConnectAfterScreenLoss()
             events(false)
-            // Another external display may still be attached: report it as for a scene.
-            if sessionEnded {
+            // Another external display may still be attached: report it as for a scene. A
+            // pending report restarts, so it is read a settle time after the last event.
+            if sessionEnded || ExternalDisplayPlugin.stillAttachedReport != nil {
                 ExternalDisplayPlugin.scheduleStillAttachedReport()
             }
         }
