@@ -124,8 +124,8 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             }
         }
         #endif
-        // The app ended the session itself: it gets no "still attached" report for it.
-        cancelStillAttachedReport()
+        // A pending "still attached" report is about a session that had already ended: keep
+        // it. A live session ended here is never reported (its scene finds no session).
         tearDownExternalSession(notifyUnplug: false)
         // Answer a connect still waiting for its scene instead of dropping it.
         completePendingConnect(false)
