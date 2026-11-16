@@ -147,12 +147,28 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         cancelStillAttachedReport()
         let report = DispatchWorkItem {
             stillAttachedReport = nil
-            if isExternalDisplayConnected() {
+            if isStillAttachedForReport() {
                 mainViewEvents?(true)
             }
         }
         stillAttachedReport = report
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: report)
+    }
+
+    /// What the delayed report counts as "still attached": a display a connect can use now.
+    static func isStillAttachedForReport() -> Bool {
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *) {
+            return isExternalDisplayConnected()
+        }
+        #endif
+        // Below iOS 27 a connect attaches to the declared scene. Until it is back there is
+        // nothing to attach to, and its own willConnect reports `true` when it returns: a
+        // `true` now would make Dart drop that later one.
+        if hostDeclaresExternalDisplayScene() {
+            return findExternalDisplayScene() != nil
+        }
+        return isExternalDisplayConnected()
     }
 
     static func cancelStillAttachedReport() {
