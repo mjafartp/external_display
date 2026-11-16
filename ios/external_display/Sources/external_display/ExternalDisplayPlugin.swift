@@ -30,6 +30,8 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
     static var pendingRouteName: String = "externalView"
     /// connect 逾時工作項目（避免永久卡住）
     static var pendingConnectTimeout: DispatchWorkItem?
+    /// The delayed plug-state report after a session ended without the app asking for it.
+    static var stillAttachedReport: DispatchWorkItem?
 
     /// iOS 27+ 的 scene accessory 註冊物件（系統據此呈現外接內容）
     static var sceneAccessoryRegistration: AnyObject?
@@ -94,6 +96,9 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // The app acts itself: drop a pending "still attached" report.
+        cancelStillAttachedReport()
+
         let args = call.arguments as? [String: Any]
         let routeName = (args?["routeName"] as? String) ?? "externalView"
         pendingRouteName = routeName
@@ -119,10 +124,40 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             }
         }
         #endif
+        // The app ended the session itself: it gets no "still attached" report for it.
+        cancelStillAttachedReport()
         tearDownExternalSession(notifyUnplug: false)
         // Answer a connect still waiting for its scene instead of dropping it.
         completePendingConnect(false)
         return true
+    }
+
+    /// A session ended without disconnect() or connect() asking for it (scene or screen
+    /// event). Report `false` now and, once UIKit has settled, `true` if an external display
+    /// is still attached, so the app can connect again. The plugin never reconnects itself.
+    static func reportSessionEnded() {
+        mainViewEvents?(false)
+        scheduleStillAttachedReport()
+    }
+
+    /// Sends `true` one second from now if an external display is attached then. On a real
+    /// unplug the scene can end a few milliseconds before UIKit drops the screen, so the
+    /// plug state is read after that, never in the disconnect callback itself.
+    static func scheduleStillAttachedReport() {
+        cancelStillAttachedReport()
+        let report = DispatchWorkItem {
+            stillAttachedReport = nil
+            if isExternalDisplayConnected() {
+                mainViewEvents?(true)
+            }
+        }
+        stillAttachedReport = report
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: report)
+    }
+
+    static func cancelStillAttachedReport() {
+        stillAttachedReport?.cancel()
+        stillAttachedReport = nil
     }
 
     // MARK: - iOS 27+ UISceneAccessory
@@ -217,11 +252,21 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
     }
 
     /// 外接 scene 斷開時清理，並停用 accessory
+    /// `sceneWindow` is the window the scene's delegate holds: only that session ends here.
+    /// After disconnect() or a replacing connect() it is gone already, and nothing is reported.
     @available(iOS 27.0, *)
-    static func handleExternalSceneDidDisconnect() {
-        tearDownExternalSession(notifyUnplug: true)
-        if let registration = sceneAccessoryRegistration as? UISceneAccessoryRegistration {
+    static func handleExternalSceneDidDisconnect(sceneWindow: UIWindow?) {
+        let sessionEnded = sceneWindow != nil && sceneWindow === externalWindow
+        if sessionEnded {
+            tearDownExternalSession(notifyUnplug: false)
+        }
+        // A connect waiting for its scene keeps the accessory enabled.
+        if pendingConnectResult == nil,
+           let registration = sceneAccessoryRegistration as? UISceneAccessoryRegistration {
             registration.isEnabled = false
+        }
+        if sessionEnded {
+            reportSessionEnded()
         }
     }
     #endif
@@ -385,13 +430,12 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
 
     /// Called by ExternalDisplaySceneDelegate below iOS 27 with the window it holds.
     static func handleDeclaredSceneDidDisconnect(sceneWindow: UIWindow?) {
-        // Tear down only the session shown on this scene. When the UIScreen disconnect
-        // observer ran first it has already done so, and nothing is torn down twice.
-        if let sceneWindow, sceneWindow === externalWindow {
-            tearDownExternalSession(notifyUnplug: false)
-        }
-        // Dart drops a repeated `false`, so the UIScreen observer may send it too.
-        mainViewEvents?(false)
+        // Only the session shown on this scene ends here. When the UIScreen disconnect
+        // observer ran first it has already done so, and a late disconnect of an older scene
+        // must not mark a live session unplugged: report nothing then.
+        guard let sceneWindow, sceneWindow === externalWindow else { return }
+        tearDownExternalSession(notifyUnplug: false)
+        reportSessionEnded()
     }
 
     /// The host's UIApplicationSceneManifest; nil when it does not use the UIScene life cycle.
@@ -475,7 +519,11 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
 
     /// 拆除外接 session（window、通道、引擎）
     /// - Parameter notifyUnplug: 是否通知主畫面「已拔除」
-    static func tearDownExternalSession(notifyUnplug: Bool) {
+    /// - Returns: whether there was a session (a window or a running engine) to tear down.
+    @discardableResult
+    static func tearDownExternalSession(notifyUnplug: Bool) -> Bool {
+        let hadSession = externalWindow != nil || externalEngine != nil
+
         // The scene delegate holds the window too: let it go with the session.
         if let window = externalWindow,
            let sceneDelegate = window.windowScene?.delegate as? ExternalDisplaySceneDelegate,
@@ -501,6 +549,7 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         if notifyUnplug {
             mainViewEvents?(false)
         }
+        return hadSession
     }
 
     /// 完成（或取消逾時後）回傳 pending 的 connect result
@@ -645,7 +694,7 @@ public class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
         #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             // 外接 scene 斷開：清理 session
-            ExternalDisplayPlugin.handleExternalSceneDidDisconnect()
+            ExternalDisplayPlugin.handleExternalSceneDidDisconnect(sceneWindow: window)
         } else {
             ExternalDisplayPlugin.handleDeclaredSceneDidDisconnect(sceneWindow: window)
         }
@@ -718,8 +767,12 @@ public class MainViewHandler: NSObject, FlutterStreamHandler {
             object: nil,
             queue: .main
         ) { _ in
-            ExternalDisplayPlugin.tearDownExternalSession(notifyUnplug: false)
+            let sessionEnded = ExternalDisplayPlugin.tearDownExternalSession(notifyUnplug: false)
             events(false)
+            // Another external display may still be attached: report it as for a scene.
+            if sessionEnded {
+                ExternalDisplayPlugin.scheduleStillAttachedReport()
+            }
         }
         return nil
     }
