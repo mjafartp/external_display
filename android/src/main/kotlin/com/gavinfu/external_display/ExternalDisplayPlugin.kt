@@ -304,6 +304,10 @@ class ExternalDisplayPlugin: FlutterPlugin, MethodCallHandler, StreamHandler, Ac
         result.success(screens)
       }
 
+      "getDisplays" -> {
+        result.success(DisplayInfo.list(context, displayManager))
+      }
+
       "connect" -> {
         connect(call, result)
       }
