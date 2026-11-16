@@ -292,8 +292,9 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         if sessionEnded {
             tearDownExternalSession(notifyUnplug: false)
         }
-        // A connect waiting for its scene keeps the accessory enabled.
-        if pendingConnectResult == nil,
+        // A connect waiting for its scene, or a session live on another scene, keeps the
+        // accessory enabled.
+        if pendingConnectResult == nil, externalWindow == nil,
            let registration = sceneAccessoryRegistration as? UISceneAccessoryRegistration {
             registration.isEnabled = false
         }
