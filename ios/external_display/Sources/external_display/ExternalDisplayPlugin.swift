@@ -626,16 +626,22 @@ extension ExternalDisplayPlugin {
     /// shows them as non-interactive). An iPhone or iPad app running on a Mac
     /// cannot tell, so every screen reports `nil` there. Sizes use the unit
     /// `connect` reports: points on iOS 27+ (the scene path), pixels before
-    /// (the `UIScreen` path).
+    /// (the `UIScreen` path) and on every iOS version when the scene path is
+    /// not compiled in (a compiler older than Swift 6.4, i.e. before Xcode 27).
     static func displayInfos() -> [[String: Any]] {
         let onMac = ProcessInfo.processInfo.isiOSAppOnMac
         return UIScreen.screens.enumerated().map { index, screen in
             let size: CGSize
+            // Same compile gate as connect, so both report the same unit.
+            #if compiler(>=6.4)
             if #available(iOS 27.0, *) {
                 size = screen.bounds.size
             } else {
                 size = screen.nativeBounds.size
             }
+            #else
+            size = screen.nativeBounds.size
+            #endif
             let hasTouch: Any = onMac ? NSNull() : (index == 0)
             return [
                 "id": index,
