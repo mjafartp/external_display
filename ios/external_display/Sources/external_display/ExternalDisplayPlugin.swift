@@ -19,6 +19,10 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
     public static var externalWindow: UIWindow?
     /// 外接畫面專用的 FlutterEngine
     public static var externalEngine: FlutterEngine?
+    /// The external engine's view controller. It is created with the engine, so the host's
+    /// plugins are registered before the engine's Dart code runs, and reused when a window
+    /// is attached.
+    static var externalViewController: FlutterViewController?
 
     /// Dart `connect` 尚未回傳時暫存的 FlutterResult（等待外接 UIScene 就緒）
     static var pendingConnectResult: FlutterResult?
@@ -240,17 +244,11 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
             prepareExternalFlutterContent(routeName: pendingRouteName)
         }
 
-        guard let engine = externalEngine else {
+        // Created with the engine, plugins already registered (prepareExternalFlutterContent).
+        guard let flutterViewController = externalViewController else {
             completePendingConnect(false)
             return
         }
-
-        let flutterViewController = FlutterViewController(
-            engine: engine,
-            nibName: nil,
-            bundle: nil
-        )
-        registerGeneratedPlugin?(flutterViewController)
 
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = flutterViewController
@@ -303,13 +301,11 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         frame.size = mode.size
 
         prepareExternalFlutterContent(routeName: routeName)
-        guard let engine = externalEngine else {
+        guard let flutterViewController = externalViewController else {
             result(false)
             return
         }
 
-        let flutterViewController = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
-        registerGeneratedPlugin?(flutterViewController)
         flutterViewController.view.frame = frame
 
         let window = UIWindow(frame: frame)
@@ -344,6 +340,18 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         )
         flutterEngine.registrar(forPlugin: "ExternalDisplaySendParameters")?
             .addMethodCallDelegate(ExternalDisplaySendParameters(), channel: sendParameters!)
+
+        // Register the host's plugins now, in the same main-thread turn as `run`. The engine
+        // runs Dart on this thread and starts the entrypoint from a later task, so the first
+        // plugin call of `externalDisplayMain` finds its handler even when the window is
+        // attached much later (iOS 27 scene accessory, scene delegate below iOS 27).
+        let flutterViewController = FlutterViewController(
+            engine: flutterEngine,
+            nibName: nil,
+            bundle: nil
+        )
+        registerGeneratedPlugin?(flutterViewController)
+        externalViewController = flutterViewController
     }
 
     /// 拆除外接 session（window、通道、引擎）
@@ -352,6 +360,7 @@ public class ExternalDisplayPlugin: NSObject, FlutterPlugin {
         externalWindow?.isHidden = true
         externalWindow?.rootViewController = nil
         externalWindow = nil
+        externalViewController = nil
 
         receiveParameters?.setStreamHandler(nil)
         receiveParameters = nil
